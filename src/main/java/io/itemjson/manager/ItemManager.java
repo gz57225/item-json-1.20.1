@@ -2,6 +2,7 @@ package io.itemjson.manager;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.itemjson.manager.misc.TooltippedBlockItem;
 import io.itemjson.manager.misc.TooltippedItem;
 import net.fabricmc.fabric.api.registry.CompostingChanceRegistry;
 import net.fabricmc.fabric.api.registry.FuelRegistry;
@@ -15,6 +16,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.Pair;
 import net.minecraft.util.Rarity;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -22,10 +24,10 @@ import java.util.*;
 import java.util.function.BiConsumer;
 
 public class ItemManager extends AbstractManager {
-    public static ArrayList<Item> ITEMS = new ArrayList<>();
+    public ArrayList<Item> ITEMS = new ArrayList<>();
 
-    public ItemManager(String mod_id) {
-        super(mod_id, "items");
+    public ItemManager(String mod_id, ClassLoader loader) {
+        super(mod_id, "items", loader);
     }
 
     private static final HashMap<String, BiConsumer<Item.Settings, JsonElement>> ELEMENT_TO_FUNC_MAP = new HashMap<>();
@@ -92,7 +94,20 @@ public class ItemManager extends AbstractManager {
         });
     }
 
-    public ArrayList<Item> registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
+    public Item getThis(String name) {
+        return getThis(Registries.ITEM, name);
+    }
+
+    public static Item get(String name) {
+        return get(Registries.ITEM, name);
+    }
+
+    /**
+     * @implNote Attribute priority: {@code class} > {@code from_block} = {@code tooltip} <br/>
+     * This means that once a high priority attribute appears, the lower priority attributes will not take effect. <br/>
+     * Also, register {@code Block} before registering {@code BlockItem}!
+     */
+    public void registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
         ArrayList<JsonObject> jsonObjects = READER.listJsons();
         ArrayList<Item> items = new ArrayList<>();
         for (var jsonObject : jsonObjects) {
@@ -106,8 +121,7 @@ public class ItemManager extends AbstractManager {
                 CompostingChanceRegistry.INSTANCE.add(item, jsonObject.get("composting_chance").getAsFloat());
             }
         }
-        ITEMS.addAll(items);
-        return items;
+        ITEMS = items;
     }
 
     protected Pair<Item, String> parse(JsonObject jsonObject) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
@@ -119,26 +133,36 @@ public class ItemManager extends AbstractManager {
             ELEMENT_TO_FUNC_MAP.get(entry.getKey()).accept(settings, entry.getValue());
         }
 
-        if (jsonObject.has("tooltips")) {
-            var TOOLTIPS = new ArrayList<Text>();
-            jsonObject.get("tooltips").getAsJsonArray().forEach(element -> {
-                JsonObject obj = element.getAsJsonObject();
-                String text = obj.get("text").getAsString();
-                String type = obj.has("type") ? obj.get("type").getAsString() : "literal";
-
-                TOOLTIPS.add(type.equals("translatable") ? Text.translatable(text) : Text.literal(text));
-            });
-            return new Pair<>(new TooltippedItem(settings, TOOLTIPS), name);
-        }
         if (jsonObject.has("class")) {
             String clazz = jsonObject.get("class").getAsString();
             return new Pair<>(newClassByPath(clazz, settings), name);
         }
+
+        if (jsonObject.has("from_block") && jsonObject.has("tooltips")) {
+            var TOOLTIPS = getTooltips(jsonObject);
+            return new Pair<>(new TooltippedBlockItem(Registries.BLOCK.get(new Identifier(jsonObject.get("from_block").getAsString())), settings, TOOLTIPS), name);
+        }
         if (jsonObject.has("from_block")) {
             return new Pair<>(new BlockItem(Registries.BLOCK.get(new Identifier(jsonObject.get("from_block").getAsString())), settings), name);
         }
+        if (jsonObject.has("tooltips")) {
+            var TOOLTIPS = getTooltips(jsonObject);
+            return new Pair<>(new TooltippedItem(settings, TOOLTIPS), name);
+        }
 
         return new Pair<>(new Item(settings), name);
+    }
+
+    private static @NotNull ArrayList<Text> getTooltips(JsonObject jsonObject) {
+        var TOOLTIPS = new ArrayList<Text>();
+        jsonObject.get("tooltips").getAsJsonArray().forEach(element -> {
+            JsonObject obj = element.getAsJsonObject();
+            String text = obj.get("text").getAsString();
+            String type = obj.has("type") ? obj.get("type").getAsString() : "literal";
+
+            TOOLTIPS.add(type.equals("translatable") ? Text.translatable(text) : Text.literal(text));
+        });
+        return TOOLTIPS;
     }
 
     protected Item newClassByPath(String path, Item.Settings settings) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {

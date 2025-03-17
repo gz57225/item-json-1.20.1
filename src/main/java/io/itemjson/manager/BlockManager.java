@@ -6,6 +6,7 @@ import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.enums.Instrument;
 import net.minecraft.block.piston.PistonBehavior;
 import net.minecraft.entity.EntityType;
 import net.minecraft.registry.Registries;
@@ -24,10 +25,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 public class BlockManager extends AbstractManager{
-    public static final ArrayList<Block> BLOCKS = new ArrayList<>();
+    public ArrayList<Block> BLOCKS = new ArrayList<>();
 
     private static final HashMap<String, BiConsumer<AbstractBlock.Settings, JsonElement>> ELEMENT_TO_FUNC_MAP = new HashMap<>();
 
@@ -42,7 +44,7 @@ public class BlockManager extends AbstractManager{
                 case "never": settings.allowsSpawning(Blocks::never); break;
                 default:
                     try {
-                        settings.allowsSpawning(typedContextPredicate(element.getAsString()));
+                        settings.allowsSpawning(entityTypedContextPredicate(element.getAsString()));
                     } catch (ClassNotFoundException | NoSuchMethodException | InvocationTargetException |
                              InstantiationException | IllegalAccessException e) {
                         throw new RuntimeException(e);
@@ -55,15 +57,35 @@ public class BlockManager extends AbstractManager{
         ELEMENT_TO_FUNC_MAP.put("burnable", (settings, element) -> {
             if (element.getAsBoolean()) settings.burnable();
         });
+        ELEMENT_TO_FUNC_MAP.put("block_vision", (settings, element) -> {
+            predicate(element, settings::blockVision);
+        });
         ELEMENT_TO_FUNC_MAP.put("drop_nothing", (settings, element) -> {
             if (element.getAsBoolean()) settings.dropsNothing();
         });
         ELEMENT_TO_FUNC_MAP.put("drops_like", (settings, element) -> {
             settings.dropsLike(Registries.BLOCK.get(new Identifier(element.getAsString())));
         });
-        ELEMENT_TO_FUNC_MAP.put("emissiveLighting", (settings, element) -> {});
+        ELEMENT_TO_FUNC_MAP.put("dynamic_bounds", (settings, element) -> {
+            if (element.getAsBoolean()) settings.dynamicBounds();
+        });
+        ELEMENT_TO_FUNC_MAP.put("emissiveLighting", (settings, element) -> {
+            predicate(element, settings::emissiveLighting);
+        });
         ELEMENT_TO_FUNC_MAP.put("hardness", (settings, element) -> {
             settings.hardness(element.getAsFloat());
+        });
+        ELEMENT_TO_FUNC_MAP.put("instrument", (settings, element) -> {
+            try {
+                settings.instrument(Instrument.valueOf(element.getAsString()));
+                return;
+            } catch (IllegalArgumentException ignored) {}
+            try {
+                settings.instrument((Instrument) newClassByPath(element.getAsString()));
+            } catch (ClassNotFoundException | NoSuchMethodException | InvocationTargetException |
+                     InstantiationException | IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
         });
         ELEMENT_TO_FUNC_MAP.put("jump_velocity_multiplier", (settings, element) -> {
             settings.jumpVelocityMultiplier(element.getAsFloat());
@@ -75,11 +97,8 @@ public class BlockManager extends AbstractManager{
             if (element.getAsJsonPrimitive().isNumber()) {
                 settings.luminance(state -> element.getAsInt());
             } else {
-                String methodPath = element.getAsString();
                 try {
-                    settings.luminance(luminanceMethod(
-                            methodPath
-                    ));
+                    settings.luminance(luminanceMethod(element.getAsString()));
                 } catch (ClassNotFoundException | NoSuchMethodException | InvocationTargetException |
                          InstantiationException | IllegalAccessException e) {
                     throw new RuntimeException(e);
@@ -130,17 +149,44 @@ public class BlockManager extends AbstractManager{
         ELEMENT_TO_FUNC_MAP.put("solid", (settings, element) -> {
             if (element.getAsBoolean()) settings.solid();
         });
+        ELEMENT_TO_FUNC_MAP.put("suffocates", (settings, element) -> {
+            predicate(element, settings::suffocates);
+        });
+        ELEMENT_TO_FUNC_MAP.put("post_process", (settings, element) -> {
+            switch (element.getAsString()) {
+                case "always": settings.postProcess(Blocks::always); break;
+                case "never": settings.postProcess(Blocks::never); break;
+                default:
+                    try {
+                        settings.postProcess(contextPredicate(element.getAsString()));
+                    } catch (ClassNotFoundException | NoSuchMethodException | InvocationTargetException |
+                             InstantiationException | IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
+            }
+        });
+        ELEMENT_TO_FUNC_MAP.put("ticks_randomly", (settings, element) -> {
+            if (element.getAsBoolean()) settings.ticksRandomly();
+        });
         ELEMENT_TO_FUNC_MAP.put("velocity_multiplier", (settings, element) -> {
             settings.velocityMultiplier(element.getAsFloat());
         });
 
     }
 
-    public BlockManager(String mod_id) {
-        super(mod_id, "blocks");
+    public Block getThis(String name) {
+        return getThis(Registries.BLOCK, name);
     }
 
-    public ArrayList<Block> registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
+    public static Block get(String name) {
+        return get(Registries.BLOCK, name);
+    }
+
+    public BlockManager(String mod_id, ClassLoader loader) {
+        super(mod_id, "blocks", loader);
+    }
+
+    public void registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
         ArrayList<JsonObject> jsonObjects = READER.listJsons();
         ArrayList<Block> blocks = new ArrayList<>();
         for (var jsonObject : jsonObjects) {
@@ -150,8 +196,7 @@ public class BlockManager extends AbstractManager{
                     RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(getModId(), info.getRight())),
                     info.getLeft()));
         }
-        BLOCKS.addAll(blocks);
-        return blocks;
+        BLOCKS = blocks;
     }
 
     protected Pair<Block, String> parse(JsonObject jsonObject) throws ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException {
@@ -184,7 +229,7 @@ public class BlockManager extends AbstractManager{
         };
     }
 
-    protected static <V> AbstractBlock.TypedContextPredicate<EntityType<?>> typedContextPredicate(String path) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+    protected static <V> AbstractBlock.TypedContextPredicate<EntityType<?>> entityTypedContextPredicate(String path) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
         Method method = methodByPath(getClassName(path), getMethodName(path), BlockState.class, BlockView.class, BlockPos.class, EntityType.class);
         return (state, view, pos, entityType) -> {
             try {
@@ -193,5 +238,30 @@ public class BlockManager extends AbstractManager{
                 throw new RuntimeException(e);
             }
         };
+    }
+
+    protected static AbstractBlock.ContextPredicate contextPredicate(String path) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+        Method method = methodByPath(getClassName(path), getMethodName(path), BlockState.class, BlockView.class, BlockPos.class);
+        return (state, view, pos) -> {
+            try {
+                return (boolean) method.invoke(null, state, view, pos);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        };
+    }
+
+    private static void predicate(JsonElement element, Function<AbstractBlock.ContextPredicate, AbstractBlock.Settings> settingsFunction) {
+        switch (element.getAsString()) {
+            case "always": settingsFunction.apply(Blocks::always); break;
+            case "never": settingsFunction.apply(Blocks::never); break;
+            default:
+                try {
+                    settingsFunction.apply(contextPredicate(element.getAsString()));
+                } catch (ClassNotFoundException | NoSuchMethodException | InvocationTargetException |
+                         InstantiationException | IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+        }
     }
 }

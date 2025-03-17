@@ -19,7 +19,7 @@
 			"io.itemjson.ItemJson"
 		],
 		"fabric-datagen": [
-			"io.itemjson.ItemJsonDataGenerator"
+          "io.itemjson.client.datagen.ItemJsonDataGenerator"
 		],
 		"client": [
 			"io.itemjson.client.ItemJsonClient"

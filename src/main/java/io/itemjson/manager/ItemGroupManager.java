@@ -2,6 +2,7 @@ package io.itemjson.manager;
 
 import com.google.gson.JsonObject;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
+import net.minecraft.block.Block;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemGroup;
 import net.minecraft.item.ItemStack;
@@ -15,19 +16,27 @@ import java.io.IOException;
 import java.util.ArrayList;
 
 public class ItemGroupManager extends AbstractManager {
-    public static final ArrayList<ItemGroup> ITEM_GROUPS = new ArrayList<>();
+    public ArrayList<ItemGroup> ITEM_GROUPS = new ArrayList<>();
 
-    public ItemGroupManager(String mod_id) {
-        super(mod_id, "item_groups");
+    public ItemGroupManager(String mod_id, ClassLoader loader) {
+        super(mod_id, "item_groups", loader);
+    }
+
+    public ItemGroup getThis(String name) {
+        return getThis(Registries.ITEM_GROUP, name);
+    }
+
+    public static ItemGroup get(String name) {
+        return get(Registries.ITEM_GROUP, name);
     }
 
     @Override
-    public ArrayList<ItemGroup> registerAll() throws IOException {
+    public void registerAll() throws IOException {
         ArrayList<JsonObject> jsonObjects = READER.listJsons();
         ArrayList<ItemGroup> itemGroups = new ArrayList<>();
         for (var jsonObject : jsonObjects) {
             String name = jsonObject.get("name").getAsString();
-            Item icon = Registries.ITEM.get(new Identifier(jsonObject.get("icon").getAsString()));
+            Item icon = ItemManager.get(jsonObject.get("icon").getAsString());
             itemGroups.add(Registry.register(
                     Registries.ITEM_GROUP,
                     RegistryKey.of(Registries.ITEM_GROUP.getKey(), Identifier.of(getModId(), name)),
@@ -42,7 +51,6 @@ public class ItemGroupManager extends AbstractManager {
                             .build()
             ));
         }
-        ITEM_GROUPS.addAll(itemGroups);
-        return ITEM_GROUPS;
+        ITEM_GROUPS = itemGroups;
     }
 }

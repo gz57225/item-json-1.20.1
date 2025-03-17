@@ -27,8 +27,11 @@ import static io.itemjson.ItemJson.MOD_ID;
 
 public abstract class AbstractManager {
     public final JsonReader READER;
-    public AbstractManager(String mod_id, String category) {
-        this.READER = JsonReader.of(mod_id, category);
+    private final String MOD_ID;
+
+    public AbstractManager(String mod_id, String category, ClassLoader loader) {
+        this.MOD_ID = mod_id;
+        this.READER = JsonReader.of(mod_id, category, loader);
     }
 
     static @NotNull String getMethodName(String path) {
@@ -39,14 +42,27 @@ public abstract class AbstractManager {
         return path.substring(0, path.indexOf('$'));
     }
 
-    public String getModId() { return READER.getModId(); }
+    public String getModId() { return MOD_ID; }
 
-    public abstract ArrayList<?> registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException;
+    public <T> T getThis(Registry<T> registry, String name) {
+        return registry.get(new Identifier(getModId(), name));
+    }
 
-    protected static  <V> Object newClassByPath(String path, Class<V> settingsClass, V settings) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+    public static <T> T get(Registry<T> registry, String name) {
+        return registry.get(new Identifier(name));
+    }
+
+    public abstract void registerAll() throws IOException, ClassNotFoundException, InvocationTargetException, NoSuchMethodException, InstantiationException, IllegalAccessException;
+
+    protected static <V> Object newClassByPath(String path, Class<V> settingsClass, V settings) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
         Class<?> clazz = Class.forName(path);
         var constructor = clazz.getDeclaredConstructor(settingsClass);
         return constructor.newInstance(settings);
+    }
+
+    protected static Object newClassByPath(String path) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
+        Class<?> clazz = Class.forName(path);
+        return clazz.getDeclaredConstructor().newInstance();
     }
 
     protected static Method methodByPath(String path, String methodName, Class<?>... paraClazz) throws ClassNotFoundException, NoSuchMethodException, InvocationTargetException, InstantiationException, IllegalAccessException {
